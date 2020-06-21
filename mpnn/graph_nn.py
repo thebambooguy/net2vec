@@ -7,6 +7,8 @@ import datetime
 import argparse
 import os
 import io
+import time
+import pandas as pd
 
 parser = argparse.ArgumentParser(description='Train the graph neural network')
 parser.add_argument('--pad', help='extra padding for node embeding',  type=int, default=12)
@@ -16,7 +18,7 @@ parser.add_argument('--lr', help='learning rate',  type=float, default=0.001)
 parser.add_argument('--log_dir', help='log dir',  type=str, default='log')
 parser.add_argument('--rn', help='number of readout neurons',  type=int, default=8)
 parser.add_argument('--buf', help='buffer',  type=int, default=200)
-parser.add_argument('-I', help='number of iteration',  type=int, default=80000)
+parser.add_argument('--I', help='number of iteration',  type=int, default=80000)
 parser.add_argument('--eval', help='evaluatioin file',  type=str, default='eval.tfrecords')
 parser.add_argument('--train', help='train file',  type=str, default='train.tfrecords')
 parser.add_argument('--test', help='test file',  type=str, default='test.tfrecords')
@@ -227,6 +229,8 @@ if __name__== "__main__":
     
     if not os.path.exists(args.log_dir):
         os.makedirs(args.log_dir)
+        path_to_plots = os.path.join(args.log_dir, 'plots')
+        os.makedirs(path_to_plots)
 
     REUSE=None
     g=tf.Graph()
@@ -288,7 +292,7 @@ if __name__== "__main__":
         test_summaries.append(tf.summary.scalar('test_mse', tf.reduce_mean( (test_labels-test_predictions)**2 ) ) )
         test_summary_op = tf.summary.merge(test_summaries)
         
-        saver = tf.train.Saver(trainables + [global_step])
+        saver = tf.train.Saver()
 
     with tf.Session(graph=g) as ses:
         ses.run(tf.local_variables_initializer())
@@ -307,6 +311,8 @@ if __name__== "__main__":
         writer=tf.summary.FileWriter(args.log_dir, ses.graph)
 
         try:
+            start = time.time()
+            start_time = datetime.datetime.now()
             while not coord.should_stop():
                     _,mse_loss,summary_py, step = ses.run([train,loss,summary_op, global_step])
                     writer.add_summary(summary_py, global_step=step)
@@ -323,8 +329,14 @@ if __name__== "__main__":
                             mse_loss,
                             np.mean(test_error**2),
                             #np.max(np.abs(test_error)),
-                            R2 ), flush=True ) 
-                        
+                            R2 ), flush=True )
+
+                        with open(args.log_dir + "/scripts_statistics.csv", "a") as f:
+                            f.write(str(step) + ',')
+                            f.write(str(mse_loss) + ',')
+                            f.write(str(np.mean(test_error**2)) + ',')
+                            f.write(str(R2) + '\n')
+
                         writer.add_summary(test_summary_py, global_step=step)
 
                         checkpoint_path = os.path.join(args.log_dir, 'model.ckpt')
@@ -335,9 +347,9 @@ if __name__== "__main__":
                         line_1(test_label_py, test_label_py)
                         plt.xlabel('test label')
                         plt.ylabel('test predictions')
-                        plt.title(str(step))
-                        #fig_path = os.path.join(args.log_dir,'scatter-{0:08}.png'.format(step) )
-                        #plt.savefig(fig_path)
+                        plt.title(str(args.log_dir)[4:] + ' - model: ' + str(step))
+                        fig_path = os.path.join(path_to_plots,'scatter-{0:08}.png'.format(step) )
+                        plt.savefig(fig_path)
                         with io.BytesIO() as buf:
                             w,h = fig.canvas.get_width_height()
                             plt.savefig(buf, format='png')
@@ -355,6 +367,12 @@ if __name__== "__main__":
 
                     if step > args.I:
                         coord.request_stop()
+                        end = time.time()
+                        script_duration = end - start
+                        with open("./log/scripts_duration.txt", "a") as f:
+                            f.write(str(start_time) + "\n")
+                            f.write(str(args.log_dir) + "\n")
+                            f.write("Duration of the script: " + str(script_duration) + "\n \n")
         except tf.errors.OutOfRangeError:
             print('OutOfRange' )
 
